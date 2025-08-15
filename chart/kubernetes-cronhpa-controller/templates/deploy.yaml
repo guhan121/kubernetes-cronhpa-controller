@@ -1,3 +1,4 @@
+{{- if .Values.deployment.enable }}
 # webhook admission controller
 ---
 apiVersion: v1
@@ -70,3 +71,4 @@ spec:
       {{- end }}
 
 
+{{- end }}

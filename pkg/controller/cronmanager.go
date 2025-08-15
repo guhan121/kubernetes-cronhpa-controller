@@ -47,7 +47,7 @@ type CronManager struct {
 }
 
 func (cm *CronManager) createOrUpdate(j CronJob) error {
-	if _, ok := cm.jobQueue.Load(j.ID()); !ok {
+	if loadJob, ok := cm.jobQueue.Load(j.ID()); !ok {
 		err := cm.cronExecutor.AddJob(j)
 		if err != nil {
 			return fmt.Errorf("Failed to add job to cronExecutor,because of %v", err)
@@ -56,7 +56,6 @@ func (cm *CronManager) createOrUpdate(j CronJob) error {
 		log.Infof("cronHPA job %s of cronHPA %s in %s created, %d active jobs exist", j.Name(), j.CronHPAMeta().Name, j.CronHPAMeta().Namespace,
 			queueLength(cm.jobQueue))
 	} else {
-		loadJob, _ := cm.jobQueue.Load(j.ID())
 		job, convert := loadJob.(*CronJobHPA)
 		if !convert {
 			return fmt.Errorf("failed to convert job %v to CronJobHPA", loadJob)
@@ -270,10 +269,18 @@ func (cm *CronManager) GC() {
 			KubeSubmittedJobsInCronEngineTotal.Add(1)
 		} else {
 			conditions := instance.Status.Conditions
+			mapJobIds := make(map[string]autoscalingv1beta1.Condition)
 			for _, c := range conditions {
-				if c.JobId != job.ID() {
-					continue
-				}
+				mapJobIds[c.JobId] = c
+			}
+			if c, ok := mapJobIds[job.ID()]; !ok {
+				log.Infof("Cron hpa %s in namespace %s has job id:%v not in conditions, delete it.", instance.Name, instance.Namespace, job.ID())
+				cm.delete(job.ID()) // job not in conditions, delete it
+				// metrics update
+				// when a job is in cron engine but not in crd.
+				// that means the job has been expired and need to be clean up.
+				KubeExpiredJobsInCronEngineTotal.Add(1)
+			} else {
 				switch c.State {
 				case autoscalingv1beta1.Succeed:
 					KubeSuccessfulJobsInCronEngineTotal.Add(1)
@@ -300,7 +307,6 @@ func (cm *CronManager) GC() {
 
 	log.V(2).Infof("Current active jobs: %d, clean up %d jobs.", left, current-left)
 }
-
 func NewCronManager(cfg *rest.Config, client client.Client, recorder record.EventRecorder) *CronManager {
 	cm := &CronManager{
 		cfg:           cfg,

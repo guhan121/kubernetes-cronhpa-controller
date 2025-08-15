@@ -81,7 +81,7 @@ func (r *ReconcileCronHorizontalPodAutoscaler) Reconcile(context context.Context
 			// Object not found, return.  Created objects are automatically garbage collected.
 			// For additional cleanup logic use finalizers.
 			log.Infof("GC start for: cronHPA %s in %s namespace is not found", request.Name, request.Namespace)
-			go r.CronManager.GC()
+			r.CronManager.GC()
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
@@ -147,7 +147,6 @@ func (r *ReconcileCronHorizontalPodAutoscaler) Reconcile(context context.Context
 	leftConditionsMap := convertConditionMaps(leftConditions)
 
 	noNeedUpdateStatus := true
-
 	for _, job := range instance.Spec.Jobs {
 		jobCondition := v1beta1.Condition{
 			Name:          job.Name,
@@ -196,6 +195,7 @@ func (r *ReconcileCronHorizontalPodAutoscaler) Reconcile(context context.Context
 		noNeedUpdateStatus = false
 		instance.Status.Conditions = updateConditions(instance.Status.Conditions, jobCondition)
 	}
+	r.CronManager.GC()
 	// conditions are not changed and no need to update.
 	if !noNeedUpdateStatus || len(leftConditions) != len(conditions) {
 		err := r.Update(context, instance)
